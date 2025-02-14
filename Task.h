@@ -1,3 +1,4 @@
+#pragma once
 #include <coroutine>
 #include <iostream>
 #include <liburing.h>
@@ -9,23 +10,6 @@ struct Attr{
     io_uring_sqe* sqe;
 };
 
-struct RecvAttr : Attr{
-    int fd;
-    char* buf;
-    size_t size;
-};
-
-struct AcceptAttr : Attr{
-    int fd;
-    sockaddr_in* clientAddr;
-    socklen_t* len;
-};
-
-struct WriteAttr : Attr{
-    int fd;
-    const char* buf;
-    size_t size;
-};
 
 class Awaitable{
     
@@ -45,48 +29,9 @@ protected:
     int* res;
 };
 
-class RecvAwaitable : public Awaitable{
-public:
-    RecvAwaitable(RecvAttr attr, int* res) : Awaitable{attr.sqe, res}{
-        io_uring_prep_recv(attr.sqe, attr.fd, attr.buf, attr.size, 0);
-    }
-};
-
-
-class AcceptAwaitable : public Awaitable{
-public:
-    AcceptAwaitable(AcceptAttr attr, int* res) : Awaitable{attr.sqe, res} {
-        io_uring_prep_accept(attr.sqe, attr.fd, reinterpret_cast<sockaddr*>(attr.clientAddr), attr.len, 0);
-    }
-};
-
-class WriteAwaitable : public Awaitable{
-public:
-    WriteAwaitable(WriteAttr attr, int* res) : Awaitable{attr.sqe, res}{
-        io_uring_prep_send(attr.sqe, attr.fd, attr.buf, attr.size, 0);
-    }
-};
-
+template<typename T>
 struct awaitable_traits{
-    template<typename T>
-    struct awaitable_type{
-        using type = T;
-    };
-
-    template<>
-    struct awaitable_type<RecvAttr>{
-        using type = RecvAwaitable;
-    };
-
-    template<>
-    struct awaitable_type<AcceptAttr>{
-        using type = AcceptAwaitable;
-    };
-
-    template<>
-    struct awaitable_type<WriteAttr>{
-        using type = WriteAwaitable;
-    };
+    using type = T;
 };
 
 enum class State{
@@ -127,7 +72,7 @@ public:
         // using traits to get the awaitable type
         template<typename AwaitableAttr>
         auto await_transform(AwaitableAttr& attr){
-            using awaitable_type = typename awaitable_traits::awaitable_type<AwaitableAttr>::type;
+            using awaitable_type = typename awaitable_traits<AwaitableAttr>::type;
             return awaitable_type{attr, &res};
         }
     };

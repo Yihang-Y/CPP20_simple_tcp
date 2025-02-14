@@ -1,85 +1,55 @@
+#pragma once
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
-#include <future>
 #include <liburing/io_uring.h>
 #include <map>
 #include <liburing.h>
 #include "IOUring.h"
 #include <string>
-#include <sys/socket.h>
-#include <system_error>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <iostream>
-#include <arpa/inet.h>
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <utility>
 #include "Connection.h"
+#include "Socket.h"
 
 
-class Socket{
-
-public:
-    Socket(const std::string& ip_port){
-        uint16_t port = std::stoi(ip_port);
-        fd = socket(AF_INET, SOCK_STREAM, 0);
-        if (fd < 0) {
-            throw std::system_error(errno, std::system_category(), "socket");
-        }
-        serverAddr = {
-            .sin_family = AF_INET,
-            .sin_port = htons(port),
-            .sin_addr = {
-                .s_addr = INADDR_ANY
-                }
-        };
-        // reuse port
-        int opt = 1;
-        if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)) < 0) {
-            throw std::system_error(errno, std::system_category(), "setsockopt");
-        }
-        if (bind(fd, (sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
-            throw std::system_error(errno, std::system_category(), "bind");
-        }
-    }
-    ~Socket(){
-        close(fd);
-    }
-
-    void listen(int backlog){
-        if (::listen(fd, backlog) < 0) {
-            throw std::system_error(errno, std::system_category(), "listen");
-        }
-    }
-
-    int fd;        
-private:
-    sockaddr_in serverAddr;
+struct AcceptAttr : Attr{
+    int fd;
+    sockaddr_in* clientAddr;
+    socklen_t* len;
 };
 
-class Task;
-class TCPServer;
+class AcceptAwaitable : public Awaitable{
+public:
+    AcceptAwaitable(AcceptAttr attr, int* res) : Awaitable{attr.sqe, res} {
+        io_uring_prep_accept(attr.sqe, attr.fd, reinterpret_cast<sockaddr*>(attr.clientAddr), attr.len, 0);
+    }
+};
 
+template<>
+struct awaitable_traits<AcceptAttr>{
+    using type = AcceptAwaitable;
+};
 
 class TCPServer{
 
 public:
     TCPServer() : serverSocket("8080"){
+        serverSocket.setResusePort();
     }
     TCPServer(const std::string& ip_port) : serverSocket(ip_port){
     }
     ~TCPServer(){}
 
-    Task accept(sockaddr_in* clientAddr, socklen_t* len){
+    Task accept(InetAddr* clientAddr){
         while (true) {
             io_uring_sqe *sqe = io_uring_get_sqe(ring.getRing());
-            AcceptAttr attr{{sqe}, serverSocket.fd, clientAddr, len};
+            auto len = clientAddr->get_size();
+            AcceptAttr attr{{sqe}, serverSocket.getFd(), clientAddr->getAddr(), &len};
             int res = co_await attr;
-            std::cout << "ACCEPTED: " << res << " FROM: " << inet_ntoa(clientAddr->sin_addr) << std::endl;
+            std::cout << "ACCEPTED: " << res << " FROM: " << clientAddr->get_sin_addr() << std::endl;
             if (res < 0) {
                 std::cout << "ERROR: "<< strerror(-res) << std::endl;
                 co_return State::Close;
@@ -96,9 +66,8 @@ public:
         serverSocket.listen(5);
         ring.init();
         
-        sockaddr_in clientAddr;
-        socklen_t len = sizeof(sockaddr_in);
-        accept(&clientAddr, &len);
+        InetAddr clientAddr;
+        accept(&clientAddr);
         while (true){
             io_uring_cqe *cqe;
             int ret = io_uring_submit_and_wait(ring.getRing(), 1);
