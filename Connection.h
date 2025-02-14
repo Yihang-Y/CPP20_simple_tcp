@@ -26,7 +26,8 @@ public:
     // add the task to the ring, await for the completion, then return the result
     Task read(){
         while (true) {
-            RecvAttr attr{{ring}, fd, readBuf, 4096};
+            io_uring_sqe *sqe = io_uring_get_sqe(ring);
+            RecvAttr attr{{sqe}, fd, readBuf, 4096};
             int res = co_await attr;
             std::cout << "Received: " << res << " bytes" << " message: " << readBuf << std::endl;
             if (res == 0) {
@@ -41,14 +42,16 @@ public:
     };
 
     Task write(size_t size){
-        WriteAttr attr{{ring}, fd, readBuf, size};
+        io_uring_sqe *sqe = io_uring_get_sqe(ring);
+        WriteAttr attr{{sqe}, fd, readBuf, size};
         int res = co_await attr;
         std::cout << "Sent: " << res << " bytes" << " message: " << readBuf << std::endl;
         co_return State::Close;
     };
 
     Task write(const char* writeBuf, size_t size){
-        WriteAttr attr{{ring}, fd, writeBuf, size};
+        io_uring_sqe *sqe = io_uring_get_sqe(ring);
+        WriteAttr attr{{sqe}, fd, writeBuf, size};
         int res = co_await attr;
         std::cout << "Sent: " << res << " bytes" << " message: " << writeBuf << std::endl;
         co_return State::Close;

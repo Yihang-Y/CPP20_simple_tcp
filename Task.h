@@ -1,11 +1,12 @@
 #include <coroutine>
 #include <iostream>
 #include <liburing.h>
+#include <liburing/io_uring.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 
 struct Attr{
-    io_uring* ring;
+    io_uring_sqe* sqe;
 };
 
 struct RecvAttr : Attr{
@@ -26,83 +27,44 @@ struct WriteAttr : Attr{
     size_t size;
 };
 
-class RecvAwaitable{
+class Awaitable{
+    
 public:
-    RecvAwaitable(RecvAttr attr, int* res) : ring(attr.ring), res(res){
-        sqe = io_uring_get_sqe(ring);
-        io_uring_prep_recv(sqe, attr.fd, attr.buf, attr.size, 0);
-    }
     bool await_ready(){
         return false;
     }
     void await_suspend(std::coroutine_handle<> handle){
         sqe->user_data = reinterpret_cast<uint64_t>(handle.address());
-        if (int err = io_uring_submit(ring) < 0) {
-            std::cout << "ERROR: "<< strerror(-err) << std::endl;
-            handle.resume();
-        }
-        io_uring_submit(ring);
     }
     int await_resume(){
         return *res;
     }
-private:
-    io_uring* ring;
+protected:
+    Awaitable(io_uring_sqe* sqe, int* res) : sqe(sqe), res(res){}
     io_uring_sqe* sqe;
     int* res;
 };
 
-
-class AcceptAwaitable{
+class RecvAwaitable : public Awaitable{
 public:
-    AcceptAwaitable(AcceptAttr attr, int* res) : ring(attr.ring), res(res){
-        sqe = io_uring_get_sqe(ring);
-        io_uring_prep_accept(sqe, attr.fd, (sockaddr*)attr.clientAddr, attr.len, 0);
+    RecvAwaitable(RecvAttr attr, int* res) : Awaitable{attr.sqe, res}{
+        io_uring_prep_recv(attr.sqe, attr.fd, attr.buf, attr.size, 0);
     }
-    bool await_ready(){
-        return false;
-    }
-    void await_suspend(std::coroutine_handle<> handle){
-        sqe->user_data = reinterpret_cast<uint64_t>(handle.address());
-        if (int err = io_uring_submit(ring) < 0) {
-            std::cout << "ERROR: "<< strerror(-err) << std::endl;
-            handle.resume();
-        }
-        io_uring_submit(ring);
-    }
-    int await_resume(){
-        return *res;
-    }
-private:
-    io_uring* ring;
-    io_uring_sqe* sqe;
-    int* res;
 };
 
-class WriteAwaitable{
+
+class AcceptAwaitable : public Awaitable{
 public:
-    WriteAwaitable(WriteAttr attr, int* res) : ring(attr.ring), res(res){
-        sqe = io_uring_get_sqe(ring);
-        io_uring_prep_write(sqe, attr.fd, attr.buf, attr.size, 0);
+    AcceptAwaitable(AcceptAttr attr, int* res) : Awaitable{attr.sqe, res} {
+        io_uring_prep_accept(attr.sqe, attr.fd, reinterpret_cast<sockaddr*>(attr.clientAddr), attr.len, 0);
     }
-    bool await_ready(){
-        return false;
+};
+
+class WriteAwaitable : public Awaitable{
+public:
+    WriteAwaitable(WriteAttr attr, int* res) : Awaitable{attr.sqe, res}{
+        io_uring_prep_send(attr.sqe, attr.fd, attr.buf, attr.size, 0);
     }
-    void await_suspend(std::coroutine_handle<> handle){
-        sqe->user_data = reinterpret_cast<uint64_t>(handle.address());
-        if (int err = io_uring_submit(ring) < 0) {
-            std::cout << "ERROR: "<< strerror(-err) << std::endl;
-            handle.resume();
-        }
-        io_uring_submit(ring);
-    }
-    int await_resume(){
-        return *res;
-    }
-private:
-    io_uring* ring;
-    io_uring_sqe* sqe;
-    int* res;
 };
 
 struct awaitable_traits{
@@ -161,7 +123,7 @@ public:
         void unhandled_exception(){
             std::terminate();
         }
-        
+
         // using traits to get the awaitable type
         template<typename AwaitableAttr>
         auto await_transform(AwaitableAttr& attr){

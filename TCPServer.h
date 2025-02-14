@@ -69,16 +69,15 @@ class TCPServer{
 
 public:
     TCPServer() : serverSocket("8080"){
-        // ring.init();
     }
     TCPServer(const std::string& ip_port) : serverSocket(ip_port){
-        // ring.init();
     }
     ~TCPServer(){}
 
     Task accept(sockaddr_in* clientAddr, socklen_t* len){
         while (true) {
-            AcceptAttr attr{{ring.getRing()}, serverSocket.fd, clientAddr, len};
+            io_uring_sqe *sqe = io_uring_get_sqe(ring.getRing());
+            AcceptAttr attr{{sqe}, serverSocket.fd, clientAddr, len};
             int res = co_await attr;
             std::cout << "ACCEPTED: " << res << " FROM: " << inet_ntoa(clientAddr->sin_addr) << std::endl;
             if (res < 0) {
@@ -102,10 +101,11 @@ public:
         accept(&clientAddr, &len);
         while (true){
             io_uring_cqe *cqe;
-            int ret = io_uring_wait_cqe(ring.getRing(), &cqe);
+            int ret = io_uring_submit_and_wait(ring.getRing(), 1);
             if(ret < 0){
                 std::cout << "ERROR in wait_cqe: "<< strerror(-ret) << std::endl;
             }
+            io_uring_peek_cqe(ring.getRing(), &cqe);
             auto handle = std::coroutine_handle<promise_res>::from_address(reinterpret_cast<void*>(cqe->user_data));
             handle.promise().res = cqe->res;
             handle.resume();
