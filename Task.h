@@ -39,43 +39,211 @@ enum class State{
     Close
 };
 
-struct promise_res{
-    // store the result of the async iouring operation
-    int res;
-    // store the state of the coroutine task
-    State state = State::Working;
+struct promise_base{
+    std::coroutine_handle<> caller = nullptr;
+    void unhandled_exception() {}
 };
 
+struct promise_always : public promise_base{
+    std::suspend_always initial_suspend() noexcept { return {}; }
+};
 
-class Task{
+struct promise_res_int : public promise_always{
+    int res;
+};
+
+template<typename T>
+class Task;
+
+template<>
+class Task<void>;
+
+template<>
+class Task<int>;
+
+template<>
+struct awaitable_traits<Task<int>>{
+    using type = Task<int>;
+};
+
+template<typename Task>
+struct TaskTraits;
+
+
+template <typename Derived>
+class TaskBase{
 public:
-    // inherit from promise_res, so we can get this from coroutine_handle
-    struct promise_type : promise_res{
-        Task get_return_object(){
-            return Task{std::coroutine_handle<promise_type>::from_promise(*this)};
+    using promise_type = typename ::promise_base;
+    using handle_type = std::coroutine_handle<promise_type>;
+
+    TaskBase(promise_type& p) : coro(handle_type::from_promise(p)) {}
+    TaskBase(const TaskBase&) = delete;
+    TaskBase(TaskBase&& t) : coro(t.coro) { t.coro = nullptr; }
+    // ~TaskBase() { if (coro) coro.destroy(); }
+    ~TaskBase() {}
+
+    void resume(){
+        // if(coro.done())
+        coro.resume();
+    }
+
+
+protected:
+    handle_type coro;
+};
+
+template<typename T>
+class Task : public TaskBase<Task<T>>{
+public:
+    using Base = TaskBase<Task<T>>;
+    struct promise_type;
+    Task(promise_type& p) : TaskBase<Task<T>>(static_cast<promise_base&>(p)) {}
+
+    struct promise_type : public promise_always{
+        T res;
+
+        template<typename U>
+        void return_value(U&& v) { res = std::forward<U>(v); }
+
+        auto get_return_object() {
+            return Task{ *this };
         }
-        std::suspend_never initial_suspend(){
+
+        std::suspend_never final_suspend() noexcept {
+            if(caller){
+                caller.resume();
+            }
             return {};
         }
-        std::suspend_never final_suspend() noexcept{
-            return {};
-        }
 
-        void return_value(State state){
-            this->state = state;
-        }
-
-        void unhandled_exception(){
-            std::terminate();
-        }
-
-        // using traits to get the awaitable type
         template<typename AwaitableAttr>
-        auto await_transform(AwaitableAttr& attr){
+        auto await_transform(AwaitableAttr&& attr){
+            if constexpr(std::is_same_v<AwaitableAttr, typename awaitable_traits<AwaitableAttr>::type>){
+                return attr;
+            }
             using awaitable_type = typename awaitable_traits<AwaitableAttr>::type;
             return awaitable_type{attr, &res};
         }
     };
-    Task(std::coroutine_handle<promise_type> handle) : handle(handle){}
-    std::coroutine_handle<promise_type> handle;
+
+    auto operator co_await() & noexcept {
+        struct awaiter {
+            Task& task;
+            bool await_ready() noexcept {
+                return task.coro.done();
+            }
+            void await_suspend(std::coroutine_handle<> awaiting) noexcept {
+                task.coro.promise().caller = awaiting;
+                task.coro.resume();
+            }
+            T await_resume() {
+                return static_cast<promise_type&>(task.coro.promise()).res;
+            }
+        };
+        return awaiter{ *this };
+    }
+};
+
+template<>
+class Task<void> : public TaskBase<Task<void>>{
+public:
+    using Base = TaskBase<Task<void>>;
+    struct promise_type;
+    Task(promise_type& p) : TaskBase<Task<void>>(static_cast<promise_base&>(p)) {}
+
+    struct promise_type : public promise_always{
+        auto get_return_object() {
+            return Task{ *this };
+        }
+
+        std::suspend_never final_suspend() noexcept { 
+            if (caller) {
+                caller.resume();
+            }    
+            return {}; 
+        }
+
+        template<typename AwaitableAttr>
+        auto await_transform(AwaitableAttr&& attr){
+            using real_type = std::remove_reference_t<AwaitableAttr>;
+            if constexpr(std::is_same_v<real_type, typename awaitable_traits<real_type>::type>){
+                #pragma message("AwaitableAttr is the same as its type")
+                return attr.operator co_await();
+            }
+            else{
+                using awaitable_type = typename awaitable_traits<AwaitableAttr>::type;
+                return awaitable_type{attr, nullptr};
+            }
+        }
+        void return_void() {}
+    };
+
+    auto operator co_await() & noexcept {
+        struct awaiter {
+            Task& task;
+            bool await_ready() noexcept {
+                return task.coro.done();
+            }
+            void await_suspend(std::coroutine_handle<> awaiting) noexcept {
+                task.coro.promise().caller = awaiting;
+                task.coro.resume();
+            }
+            void await_resume() {}
+        };
+        return awaiter{ *this };
+    }
+};
+
+template<>
+class Task<int> : public TaskBase<Task<int>>{
+public:
+    using Base = TaskBase<Task<int>>;
+    struct promise_type;
+    Task(promise_type& p) : TaskBase<Task<int>>(static_cast<promise_base&>(p)) {}
+
+    struct promise_type : public promise_res_int{
+
+        void return_value(int v) { res = v; }
+        
+        auto get_return_object() {
+            return Task{ *this };
+        }
+
+        std::suspend_never final_suspend() noexcept {
+            if(caller){
+                caller.resume();
+            }
+            return {};
+        }
+
+        template<typename AwaitableAttr>
+        auto await_transform(AwaitableAttr&& attr){
+            using real_type = std::remove_reference_t<AwaitableAttr>;
+            if constexpr(std::is_same_v<real_type, typename awaitable_traits<real_type>::type>){
+                #pragma message("AwaitableAttr is the same as its type")
+                return attr.operator co_await();
+            }
+            else {
+                using awaitable_type = typename awaitable_traits<AwaitableAttr>::type;
+                return awaitable_type{attr, &res};
+            }
+        }
+    };
+
+    auto operator co_await() & noexcept {
+        struct awaiter {
+            Task& task;
+            bool await_ready() noexcept {
+                return task.coro.done();
+            }
+            void await_suspend(std::coroutine_handle<> awaiting) noexcept {
+                task.coro.promise().caller = awaiting;
+                task.coro.resume();
+            }
+            int await_resume() {
+                return static_cast<promise_type&>(task.coro.promise()).res;
+            }
+        };
+        return awaiter{ *this };
+    }
 };
