@@ -101,7 +101,7 @@ public:
                 std::cout << "ERROR in wait_cqe: "<< strerror(-ret) << std::endl;
             }
             io_uring_peek_cqe(ring.getRing(), &cqe);
-            auto handle = std::coroutine_handle<promise_res_int>::from_address(reinterpret_cast<void*>(cqe->user_data));
+            auto handle = std::coroutine_handle<promise_type<int>>::from_address(reinterpret_cast<void*>(cqe->user_data));
             (handle.promise().res) = cqe->res;
             handle.resume();
             io_uring_cqe_seen(ring.getRing(), cqe);
