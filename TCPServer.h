@@ -21,9 +21,9 @@ struct AcceptAttr : Attr{
     socklen_t* len;
 };
 
-class AcceptAwaitable : public Awaitable{
+class AcceptAwaitable : public SubmitAwaitable{
 public:
-    AcceptAwaitable(AcceptAttr attr, int* res) : Awaitable{attr.sqe, res} {
+    AcceptAwaitable(AcceptAttr attr, int* res) : SubmitAwaitable{attr.sqe, res}{
         io_uring_prep_accept(attr.sqe, attr.fd, reinterpret_cast<sockaddr*>(attr.clientAddr), attr.len, 0);
     }
 };

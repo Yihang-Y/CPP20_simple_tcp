@@ -12,10 +12,11 @@ struct Attr{
 };
 
 class Awaitable{
+};
+
+class SubmitAwaitable : public Awaitable{
 public:
-    bool await_ready(){
-        return false;
-    }
+    bool await_ready() noexcept { return false; }
     void await_suspend(std::coroutine_handle<> handle){
         sqe->user_data = reinterpret_cast<uint64_t>(handle.address());
     }
@@ -23,9 +24,30 @@ public:
         return *res;
     }
 protected:
-    Awaitable(io_uring_sqe* sqe, int* res) : sqe(sqe), res(res){}
+    SubmitAwaitable(io_uring_sqe* sqe, int* res) : sqe(sqe), res(res){}
     io_uring_sqe* sqe;
     int* res;
+};
+
+template<typename TaskType>
+class TaskAwaitable : public Awaitable{
+public:
+    explicit TaskAwaitable(TaskType& task) : task(task) {}
+    // HACK: didn't really think about why use task.coro.done() here
+    bool await_ready() noexcept {
+        return task.coro.done();
+    }
+    void await_suspend(std::coroutine_handle<> awaiting) noexcept {
+        task.coro.promise().caller = awaiting;
+        task.coro.resume();
+    }
+    TaskType::return_type await_resume() {
+        return static_cast<TaskType::promise_type&>(task.coro.promise()).res;
+    }
+private:
+    // HACK: and here the awaiter store the reference of the Task object, why not promise_type? or?
+    // TODO: the lifetime of this, should be considered more carefully
+    TaskType& task;
 };
 
 template<typename T>
@@ -134,26 +156,15 @@ class Task : public TaskBase<Task<T>>{
 public:
     using Base = TaskBase<Task<T>>;
     using promise_type = typename ::promise_type<T>;
+    using return_type = T;
+    friend TaskAwaitable<Task<T>>;
 
     Task(promise_type& p) : TaskBase<Task<T>>(static_cast<promise_base&>(p)) {}
 
     // NOTE: here I come accross a problem that arises from the & after the function declaration
     // when there is a & after the function declaration, the function can only be call by a lvalue
     auto operator co_await() noexcept {
-        struct awaiter {
-            Task& task;
-            bool await_ready() noexcept {
-                return task.coro.done();
-            }
-            void await_suspend(std::coroutine_handle<> awaiting) noexcept {
-                task.coro.promise().caller = awaiting;
-                task.coro.resume();
-            }
-            T await_resume() {
-                return static_cast<promise_type&>(task.coro.promise()).res;
-            }
-        };
-        return awaiter{ *this };
+        return TaskAwaitable<Task<T>>(*this);
     }
 };
 
@@ -161,7 +172,10 @@ template<>
 class Task<void> : public TaskBase<Task<void>>{
 public:
     using Base = TaskBase<Task<void>>;
-    struct promise_type;
+    using return_type = void;
+    // NOTE: use friend to make the TaskAwaitable<Task<void>> access the private members, as it used to be the inner class
+    friend TaskAwaitable<Task<void>>;
+    
     Task(promise_type& p) : TaskBase<Task<void>>(static_cast<promise_base&>(p)) {}
 
     struct promise_type : public promise_base{
@@ -173,17 +187,6 @@ public:
     };
 
     auto operator co_await() noexcept {
-        struct awaiter {
-            Task& task;
-            bool await_ready() noexcept {
-                return task.coro.done();
-            }
-            void await_suspend(std::coroutine_handle<> awaiting) noexcept {
-                task.coro.promise().caller = awaiting;
-                task.coro.resume();
-            }
-            void await_resume() {}
-        };
-        return awaiter{ *this };
+        return TaskAwaitable<Task<void>>(*this);
     }
 };

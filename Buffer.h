@@ -14,16 +14,16 @@ struct WriteAttr : Attr{
     size_t size;
 };
 
-class RecvAwaitable : public Awaitable{
+class RecvAwaitable : public SubmitAwaitable{
 public:
-    RecvAwaitable(RecvAttr attr, int* res) : Awaitable{attr.sqe, res}{
+    RecvAwaitable(RecvAttr attr, int* res) : SubmitAwaitable{attr.sqe, res}{
         io_uring_prep_readv(attr.sqe, attr.fd, attr.buf, 2, 0);
     }
 };
 
-class WriteAwaitable : public Awaitable{
+class WriteAwaitable : public SubmitAwaitable{
 public:
-    WriteAwaitable(WriteAttr attr, int* res) : Awaitable{attr.sqe, res}{
+    WriteAwaitable(WriteAttr attr, int* res) : SubmitAwaitable{attr.sqe, res}{
         io_uring_prep_send(attr.sqe, attr.fd, attr.buf, attr.size, 0);
     }
 };
