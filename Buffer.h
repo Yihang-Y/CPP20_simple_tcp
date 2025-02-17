@@ -40,7 +40,6 @@ struct awaitable_traits<WriteAttr>{
 
 class Buffer {
 public:
-// friend class Connection;
     static const size_t kCheapPrepend = 8;
     // 1KB initial size
     static const size_t kInitialSize = 1024;
@@ -115,10 +114,10 @@ public:
         writerIndex += len;
     }
 
-    Task<int> recv(io_uring *ring, int fd) {
+    Task<int> recv(int fd) {
         char extraBuf[65536];
 
-        io_uring_sqe *sqe = io_uring_get_sqe(ring);
+        io_uring_sqe *sqe = io_uring_get_sqe(getScheduler().getRing());
         struct iovec vec[2];
         vec[0].iov_base = begin() + writerIndex;
         vec[0].iov_len = writableBytes();
@@ -145,13 +144,13 @@ public:
         co_return res;
     }
 
-    Task<int> send(io_uring *ring, int fd, size_t len) {
+    Task<int> send(int fd, size_t len) {
         while (len > 0){
             if (readableBytes() < len){
                 std::cout << "ERROR: Not enough data to send" << std::endl;
                 co_return -1;
             }
-            io_uring_sqe *sqe = io_uring_get_sqe(ring);
+            io_uring_sqe *sqe = io_uring_get_sqe(getScheduler().getRing());
             char* buf = begin() + readerIndex;
 
             int res = co_await WriteAttr{{sqe}, fd, buf, len};

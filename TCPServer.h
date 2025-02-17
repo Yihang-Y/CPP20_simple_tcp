@@ -4,7 +4,7 @@
 #include <liburing/io_uring.h>
 #include <map>
 #include <liburing.h>
-#include "IOUring.h"
+#include "IoUringScheduler.h"
 #include <string>
 #include <unistd.h>
 #include <iostream>
@@ -43,8 +43,14 @@ public:
     }
     ~TCPServer(){}
 
+    /**
+     * @brief warp the accept function with coroutine
+     * 
+     * @param clientAddr 
+     * @return Task<int> 
+     */
     Task<int> accept(InetAddr* clientAddr) {
-        io_uring_sqe *sqe = io_uring_get_sqe(ring.getRing());
+        io_uring_sqe *sqe = io_uring_get_sqe(getScheduler().getRing());
         auto len = clientAddr->get_size();
         int res = co_await AcceptAttr{{sqe}, serverSocket.getFd(), clientAddr->getAddr(), &len};
         std::cout << "ACCEPTED: " << res << " FROM: " << clientAddr->get_sin_addr() << std::endl;
@@ -63,7 +69,7 @@ public:
                 std::cout << "ERROR: "<< strerror(-clientFd) << std::endl;
                 continue;
             }
-            connections.emplace(std::piecewise_construct_t{}, std::forward_as_tuple(clientFd), std::forward_as_tuple(clientFd, ring.getRing()));
+            connections.emplace(std::piecewise_construct_t{}, std::forward_as_tuple(clientFd), std::forward_as_tuple(clientFd));
             // spawn(handle_client(clientFd));
             handle_client(clientFd).resume();
         }
@@ -90,25 +96,16 @@ public:
 
     void run(){
         serverSocket.listen(5);
-        ring.init();
+        // ring.init();
         
         Task t = echo();
+        // FIXME: as I implement all Task as initial_suspend always, so I have to resume it here
         t.resume();
-        while (true){
-            io_uring_cqe *cqe;
-            int ret = io_uring_submit_and_wait(ring.getRing(), 1);
-            if(ret < 0){
-                std::cout << "ERROR in wait_cqe: "<< strerror(-ret) << std::endl;
-            }
-            io_uring_peek_cqe(ring.getRing(), &cqe);
-            auto handle = std::coroutine_handle<promise_type<int>>::from_address(reinterpret_cast<void*>(cqe->user_data));
-            (handle.promise().res) = cqe->res;
-            handle.resume();
-            io_uring_cqe_seen(ring.getRing(), cqe);
-        }
+
+        getScheduler().run();
     }
 
-    IOUring ring;
+    // IOUring ring;
 private:
     Socket serverSocket;
  
