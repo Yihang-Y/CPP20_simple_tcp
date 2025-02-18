@@ -4,6 +4,9 @@
 # all files in build directory
 build/
 
+# file starts with local
+local*
+
 # Compiled Object files
 *.slo
 *.lo
