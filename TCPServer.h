@@ -11,8 +11,10 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <utility>
+#include <variant>
 #include "Connection.h"
 #include "Socket.h"
+#include "Task.h"
 
 
 struct AcceptAttr : Attr{
@@ -93,12 +95,31 @@ public:
         }
     }
 
+    Task<void> wait_one_accept(){
+        auto clientAddr1 = new InetAddr();
+        auto clientAddr2 = new InetAddr();
+
+        auto task1 = accept(clientAddr1);
+        auto task2 = accept(clientAddr2);
+
+        auto res = co_await when_any(task1, task2);
+        if (res.result.has_value()){
+            auto v = res.result.value();
+            std::visit([](auto&& arg){
+                std::cout << "ACCEPTED: " << arg << std::endl;
+            }, v);
+        }
+        else {
+            throw res.error;
+        }
+    }
+
 
     void run(){
         serverSocket.listen(5);
         // ring.init();
         
-        Task t = echo();
+        Task t = wait_one_accept();
         // FIXME: as I implement all Task as initial_suspend always, so I have to resume it here
         t.resume();
 

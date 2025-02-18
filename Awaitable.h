@@ -2,8 +2,8 @@
 #include <coroutine>
 #include <liburing.h>
 #include <liburing/io_uring.h>
+#include <any>
 #include "IoUringScheduler.h"
-
 
 // NOTE: Attr, Awaitable and awaitable_traits used to foward the parameters to the io_uring functions
 struct Attr{
@@ -49,8 +49,13 @@ public:
         task.coro.resume();
     }
     TaskType::return_type await_resume() {
-        auto promise = static_cast<TaskType::promise_type&>(task.coro.promise());
-        return std::any_cast<typename TaskType::return_type>(promise.data);
+        if constexpr(std::is_same_v<typename TaskType::return_type, void>){
+            return;
+        }
+        else{
+            auto promise = static_cast<TaskType::promise_type&>(task.coro.promise());
+            return std::any_cast<typename TaskType::return_type>(promise.data);
+        }
     }
 private:
     // HACK: and here the awaiter store the reference of the Task object, why not promise_type? or?
@@ -58,7 +63,44 @@ private:
     TaskType& task;
 };
 
+class CoroAwaitable : public Awaitable{
+public:
+    bool await_ready() noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle){
+        coro = handle;
+        handle.resume();
+    }
+    std::coroutine_handle<> await_resume(){
+        return coro;
+    }
+private:
+    std::coroutine_handle<> coro;
+};
+
+class ForgetAwaitable : public Awaitable{
+public:
+    bool await_ready() noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle){
+        // HACK: just forget the coroutine
+        // FIXME: should be destroy the coroutine somehow
+    }
+    void await_resume(){}
+};
+
+// HACK: just a tag here, to distinguish in @PromiseType::await_transform
+struct DoAsOriginal{};
+
 template<typename T>
 struct awaitable_traits{
     using type = T;
+};
+
+template<>
+struct awaitable_traits<CoroAwaitable>{
+    using type = typename ::DoAsOriginal;
+};
+
+template<>
+struct awaitable_traits<ForgetAwaitable>{
+    using type = typename ::DoAsOriginal;
 };

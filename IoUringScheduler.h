@@ -8,6 +8,12 @@
 #include <coroutine>
 #include "Promise.h"
 
+// forward declaration
+template<typename T>
+class Task;
+
+template<>
+class Task<void>;
 
 class IoUringScheduler{
 public:

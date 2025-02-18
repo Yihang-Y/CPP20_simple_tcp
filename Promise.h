@@ -1,4 +1,5 @@
 #pragma once
+// #include "Awaitable.h"
 #include <coroutine>
 #include <any>
 #include <cstddef>
@@ -9,6 +10,7 @@ template<typename T>
 class Task;
 template<typename T>
 struct awaitable_traits;
+struct DoAsOriginal;
 
 /**
  * @brief used to implement the chains of coroutines
@@ -20,10 +22,7 @@ struct awaitable_traits;
  * it will use coro.resume() to explicitly resume the coroutine.
  */
 struct promise_base{
-    promise_base() {
-        caller = nullptr;
-        data = -1;
-    };
+    promise_base() = default;
     promise_base(std::coroutine_handle<> caller, std::any data) : caller(caller), data(std::move(data)){}
     std::coroutine_handle<> caller = nullptr;
     std::any data;
@@ -74,6 +73,9 @@ struct promise_type : public promise_base{
         if constexpr(std::is_same_v<real_type, typename awaitable_traits<real_type>::type>){
             // #pragma message("AwaitableAttr is the same as its type")
             return attr.operator co_await();
+        } else if constexpr (std::is_same_v<typename ::DoAsOriginal, typename awaitable_traits<AwaitableAttr>::type>){
+            #pragma message("AwaitableAttr is DoAsOriginal")
+            return attr;
         }
         else {
             using awaitable_type = typename awaitable_traits<AwaitableAttr>::type;

@@ -1,7 +1,12 @@
 #pragma once
 #include <coroutine>
+#include <iostream>
 #include <liburing.h>
 #include <liburing/io_uring.h>
+#include <memory>
+#include <optional>
+#include <tuple>
+#include <utility>
 #include "Awaitable.h"
 #include "Promise.h"
 
@@ -33,10 +38,30 @@ public:
 
     void resume(){
         // FIXME: if(coro.done()), might be a bug
-        coro.resume();
+        if (!coro.done())
+        {
+            std::cout << "RESUME: " << &coro << std::endl;
+            coro.resume();
+        }
     }
 
-protected:
+    void then(std::coroutine_handle<> nextTask) {
+        if(coro.promise().caller){
+            // FIXME: should find another way to implement this feat
+            std::cout << "ERROR: set nextTask for a coroutine that already has a caller" << std::endl;
+        }else{
+            coro.promise().caller = nextTask;
+        }
+        return this->resume();
+    }
+
+    // NOTE: it will be meaningless as you can't get its return_type inside the coroutine, the only way to get
+    // a coro inside the coroutine is to use the co_await
+    // std::coroutine_handle<> get_this_coro(){
+    //     return coro;
+    // }
+
+// protected:
     handle_type coro;
 };
 
@@ -78,4 +103,39 @@ public:
     auto operator co_await() noexcept {
         return TaskAwaitable<Task<void>>(*this);
     }
+};
+
+template<typename T>
+class when_any_state {
+public:
+    std::optional<T> result;
+    std::exception_ptr error;
+};
+
+template<typename... Task>
+auto when_any(Task&&... tasks) -> ::Task<when_any_state<std::variant<typename std::decay_t<Task>::return_type...>>>
+{
+    (std::cout << ... << &tasks ) << std::endl;
+    std::atomic<bool> completed{false};
+    using retutn_type = std::variant<typename std::decay_t<Task>::return_type...>;
+
+    auto this_coro = co_await CoroAwaitable{};
+    auto state = when_any_state<retutn_type>();
+
+    auto start_task = [&state, &completed](auto& task) -> ::Task<void> {
+        auto result = co_await task;
+        if (!completed.exchange(true)) {
+            state.result = retutn_type{std::in_place_index<0>, result};
+        }
+        else {
+            state.error = std::current_exception();
+        }
+        co_return;
+    };
+    
+    (start_task(tasks).then(this_coro), ...);
+    co_await ForgetAwaitable{};
+    // FIXME: cancel all the other tasks, and the IO_uring cancle part should be done in the Task itself
+
+    co_return state;
 };
