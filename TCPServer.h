@@ -23,16 +23,32 @@ struct AcceptAttr : Attr{
     socklen_t* len;
 };
 
-class AcceptAwaitable : public SubmitAwaitable{
+class AcceptAwaitable : public SubmitAwaitable<int>{
 public:
     AcceptAwaitable(AcceptAttr attr, int* res) : SubmitAwaitable{attr.sqe, res}{
         io_uring_prep_accept(attr.sqe, attr.fd, reinterpret_cast<sockaddr*>(attr.clientAddr), attr.len, 0);
     }
 };
 
+struct CancelAttr : Attr{
+    int data;
+};
+
+class CancelAwaitable : public SubmitAwaitable<void>{
+public:
+    CancelAwaitable(CancelAttr attr) : SubmitAwaitable{attr.sqe}{
+        io_uring_prep_cancel64(attr.sqe, attr.data, 0);
+    }
+};
+
 template<>
 struct awaitable_traits<AcceptAttr>{
     using type = AcceptAwaitable;
+};
+
+template<>
+struct awaitable_traits<CancelAttr>{
+    using type = CancelAwaitable;
 };
 
 class TCPServer{
@@ -55,6 +71,12 @@ public:
         io_uring_sqe *sqe = io_uring_get_sqe(getScheduler().getRing());
         auto len = clientAddr->get_size();
         int res = co_await AcceptAttr{{sqe}, serverSocket.getFd(), clientAddr->getAddr(), &len};
+        auto this_coro = co_await CoroAwaitable{};
+        auto this_coro_promise = std::coroutine_handle<promise_base>::from_address(this_coro.address());
+        if (this_coro_promise.promise().canceled){
+            std::cout << "CANCEL" << std::endl;
+            co_await CancelAttr{{sqe}, 1};
+        }
         std::cout << "ACCEPTED: " << res << " FROM: " << clientAddr->get_sin_addr() << std::endl;
         if (res < 0) {
             std::cout << "ERROR: "<< strerror(-res) << std::endl;

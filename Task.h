@@ -1,11 +1,14 @@
 #pragma once
 #include <coroutine>
+#include <cstddef>
 #include <iostream>
 #include <liburing.h>
 #include <liburing/io_uring.h>
 #include <memory>
 #include <optional>
+#include <ostream>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include "Awaitable.h"
 #include "Promise.h"
@@ -45,11 +48,12 @@ public:
         }
     }
 
-    void then(std::coroutine_handle<> nextTask) {
+    void then(std::coroutine_handle<>& nextTask) {
         if(coro.promise().caller){
             // FIXME: should find another way to implement this feat
             std::cout << "ERROR: set nextTask for a coroutine that already has a caller" << std::endl;
         }else{
+            std::cout << "SET CALLER: " << &nextTask << std::endl;
             coro.promise().caller = nextTask;
         }
         return this->resume();
@@ -98,6 +102,26 @@ public:
         auto get_return_object() {
             return Task<void>{ *this };
         }
+
+        template<typename AwaitableAttr>
+        auto await_transform(AwaitableAttr&& attr){
+            using real_type = std::remove_reference_t<AwaitableAttr>;
+            if constexpr(std::is_same_v<real_type, typename awaitable_traits<real_type>::type>){
+                #pragma message("AwaitableAttr is the same as its type")
+                // FIXME: should be more explicit here
+                std::cout << "call await_transform with the same type" << std::endl;
+                // NOTE: only when you co_awiat a Task, you need to store the callee
+                callee = attr.coro;
+                return attr.operator co_await();
+            } else if constexpr (std::is_same_v<typename ::DoAsOriginal, typename awaitable_traits<AwaitableAttr>::type>){
+                // #pragma message("AwaitableAttr is DoAsOriginal")
+                return attr;
+            }
+            else {
+                using awaitable_type = typename awaitable_traits<AwaitableAttr>::type;
+                return awaitable_type{attr};
+            }
+        }
     };
 
     auto operator co_await() noexcept {
@@ -120,9 +144,11 @@ auto when_any(Task&&... tasks) -> ::Task<when_any_state<std::variant<typename st
     using retutn_type = std::variant<typename std::decay_t<Task>::return_type...>;
 
     auto this_coro = co_await CoroAwaitable{};
+    // auto this_coro = std::coroutine_handle<>::from_address(&coro);
     auto state = when_any_state<retutn_type>();
 
     auto start_task = [&state, &completed](auto& task) -> ::Task<void> {
+        std::cout << std::is_same_v<std::remove_reference_t<decltype(task)>, ::Task<int>> << std::endl;
         auto result = co_await task;
         if (!completed.exchange(true)) {
             state.result = retutn_type{std::in_place_index<0>, result};
@@ -132,10 +158,18 @@ auto when_any(Task&&... tasks) -> ::Task<when_any_state<std::variant<typename st
         }
         co_return;
     };
-    
-    (start_task(tasks).then(this_coro), ...);
+    auto tasks_tuple = [&]<size_t... idx>(std::index_sequence<idx...>) {
+        return std::make_tuple( start_task.operator()(tasks)... );
+    }(std::index_sequence_for<Task...>{});
+    // start all the tasks
+    [&]<size_t... idx>(std::index_sequence<idx...>) {
+        (std::get<idx>(tasks_tuple).then(this_coro), ...);
+    }(std::index_sequence_for<Task...>{});
     co_await ForgetAwaitable{};
     // FIXME: cancel all the other tasks, and the IO_uring cancle part should be done in the Task itself
-
+    // 获取当前所有的task，在单线程的情况下，task肯定是在某处co_await, 所以cancel的目的是从得到的Task向下找
+    [&]<size_t... idx>(std::index_sequence<idx...>) {
+        (std::get<idx>(tasks_tuple).coro.promise().cancel(), ...);
+    }(std::index_sequence_for<Task...>{});
     co_return state;
 };

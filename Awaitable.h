@@ -3,7 +3,9 @@
 #include <liburing.h>
 #include <liburing/io_uring.h>
 #include <any>
+#include <variant>
 #include "IoUringScheduler.h"
+#include "Promise.h"
 
 // NOTE: Attr, Awaitable and awaitable_traits used to foward the parameters to the io_uring functions
 struct Attr{
@@ -11,6 +13,8 @@ struct Attr{
 };
 
 class Awaitable{
+protected:
+    bool cancel = false;
 };
 
 /**
@@ -20,20 +24,37 @@ class Awaitable{
  * it will automatically transform into an SubmitAwaitable, which will warp the current coroutine into the sqe->user_data
  * This class controls the lifetime of the coroutine have co_await Attr.
  */
+template<typename ResType>
 class SubmitAwaitable : public Awaitable{
 public:
+    using type = ResType;
     bool await_ready() noexcept { return false; }
     void await_suspend(std::coroutine_handle<> handle){
         sqe->user_data = getScheduler().getNewId();
         getScheduler().handles[sqe->user_data] = handle;
     }
-    int await_resume(){
+    ResType await_resume(){
         return *res;
     }
 protected:
-    SubmitAwaitable(io_uring_sqe* sqe, int* res) : sqe(sqe), res(res){}
+    SubmitAwaitable(io_uring_sqe* sqe, ResType* res) : sqe(sqe), res(res){}
     io_uring_sqe* sqe;
-    int* res;
+    ResType* res;
+};
+
+template<>
+class SubmitAwaitable<void> : public Awaitable{
+public:
+    using type = void;
+    bool await_ready() noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> handle){
+        sqe->user_data = getScheduler().getNewId();
+        getScheduler().handles[sqe->user_data] = handle;
+    }
+    void await_resume(){}
+protected:
+    SubmitAwaitable(io_uring_sqe* sqe) : sqe(sqe){}
+    io_uring_sqe* sqe;
 };
 
 template<typename TaskType>
@@ -42,19 +63,39 @@ public:
     explicit TaskAwaitable(TaskType& task) : task(task) {}
     // HACK: didn't really think about why use task.coro.done() here
     bool await_ready() noexcept {
+        // // 这里得到的task是当前co_await的task
+        // if(task.coro.promise().canceled){
+        //     // just go forward to resume function
+        //     return true;
+        // }
         return task.coro.done();
     }
+
+    /**
+     * @brief we will pass the control to the task, and setting the caller of the task to the current coroutine
+     * if the task is canceled, we will just go forward to the resume function
+     * 
+     * @param awaiting 
+     */
     void await_suspend(std::coroutine_handle<> awaiting) noexcept {
-        task.coro.promise().caller = awaiting;
-        task.coro.resume();
+        if(task.coro.promise().canceled){
+            cancel = true;
+            awaiting.resume();
+        }else{
+            task.coro.promise().caller = awaiting;
+            task.coro.resume();
+        }
     }
     TaskType::return_type await_resume() {
+        if (cancel) {
+            throw CancelledException{};
+        }
         if constexpr(std::is_same_v<typename TaskType::return_type, void>){
-            return;
+                return;
         }
         else{
-            auto promise = static_cast<TaskType::promise_type&>(task.coro.promise());
-            return std::any_cast<typename TaskType::return_type>(promise.data);
+            auto coro = std::coroutine_handle<typename TaskType::promise_type>::from_address(task.coro.address());
+            return std::any_cast<typename TaskType::return_type>(coro.promise().data);
         }
     }
 private:
@@ -69,11 +110,17 @@ public:
     void await_suspend(std::coroutine_handle<> handle){
         coro = handle;
         handle.resume();
+        // coro = std::coroutine_handle<promise_base>::from_address(handle.address());
+        // handle.resume();
     }
+    // std::coroutine_handle<promise_base> await_resume(){
+    //     return coro;
+    // }
     std::coroutine_handle<> await_resume(){
         return coro;
     }
 private:
+    // std::coroutine_handle<promise_base> coro;
     std::coroutine_handle<> coro;
 };
 
