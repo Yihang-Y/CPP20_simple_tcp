@@ -15,41 +15,8 @@
 #include "Connection.h"
 #include "Socket.h"
 #include "Task.h"
+#include "io_task.h"
 
-
-struct AcceptAttr : Attr{
-    int fd;
-    sockaddr_in* clientAddr;
-    socklen_t* len;
-};
-
-class AcceptAwaitable : public SubmitAwaitable<int>{
-public:
-    AcceptAwaitable(AcceptAttr attr, int* res) : SubmitAwaitable{attr.sqe, res}{
-        io_uring_prep_accept(attr.sqe, attr.fd, reinterpret_cast<sockaddr*>(attr.clientAddr), attr.len, 0);
-    }
-};
-
-struct CancelAttr : Attr{
-    int data;
-};
-
-class CancelAwaitable : public SubmitAwaitable<void>{
-public:
-    CancelAwaitable(CancelAttr attr) : SubmitAwaitable{attr.sqe}{
-        io_uring_prep_cancel64(attr.sqe, attr.data, 0);
-    }
-};
-
-template<>
-struct awaitable_traits<AcceptAttr>{
-    using type = AcceptAwaitable;
-};
-
-template<>
-struct awaitable_traits<CancelAttr>{
-    using type = CancelAwaitable;
-};
 
 class TCPServer{
 
@@ -71,12 +38,13 @@ public:
         io_uring_sqe *sqe = io_uring_get_sqe(getScheduler().getRing());
         auto len = clientAddr->get_size();
         int res = co_await AcceptAttr{{sqe}, serverSocket.getFd(), clientAddr->getAddr(), &len};
-        auto this_coro = co_await CoroAwaitable{};
-        auto this_coro_promise = std::coroutine_handle<promise_base>::from_address(this_coro.address());
-        if (this_coro_promise.promise().canceled){
-            std::cout << "CANCEL" << std::endl;
-            co_await CancelAttr{{sqe}, 1};
-        }
+        // auto this_coro = co_await CoroAwaitable{};
+        // auto this_coro_promise = std::coroutine_handle<promise_base>::from_address(this_coro.address());
+        // if (this_coro_promise.promise().canceled){
+        //     std::cout << "Task canceled" << std::endl;
+        //     co_await CancelAttr{{sqe}, 1};
+        //     co_return -1;
+        // }
         std::cout << "ACCEPTED: " << res << " FROM: " << clientAddr->get_sin_addr() << std::endl;
         if (res < 0) {
             std::cout << "ERROR: "<< strerror(-res) << std::endl;
@@ -95,7 +63,7 @@ public:
             }
             connections.emplace(std::piecewise_construct_t{}, std::forward_as_tuple(clientFd), std::forward_as_tuple(clientFd));
             // spawn(handle_client(clientFd));
-            handle_client(clientFd).resume();
+            // handle_client(clientFd).resume();
         }
     }
 
@@ -117,31 +85,34 @@ public:
         }
     }
 
-    Task<void> wait_one_accept(){
-        auto clientAddr1 = new InetAddr();
-        auto clientAddr2 = new InetAddr();
+    // Task<void> wait_one_accept(){
+    //     auto clientAddr1 = new InetAddr();
+    //     auto clientAddr2 = new InetAddr();
+    //     auto clientAddr3 = new InetAddr();
 
-        auto task1 = accept(clientAddr1);
-        auto task2 = accept(clientAddr2);
+    //     auto task1 = accept(clientAddr1);
+    //     auto task2 = accept(clientAddr2);
+    //     auto task3 = accept(clientAddr3);
 
-        auto res = co_await when_any(task1, task2);
-        if (res.result.has_value()){
-            auto v = res.result.value();
-            std::visit([](auto&& arg){
-                std::cout << "ACCEPTED: " << arg << std::endl;
-            }, v);
-        }
-        else {
-            throw res.error;
-        }
-    }
+    //     auto res = co_await when_any(task1, task2, task3);
+    //     if (res.result.has_value()){
+    //         auto v = res.result.value();
+    //         std::visit([](auto&& arg){
+    //             std::cout << "ACCEPTED: " << arg << std::endl;
+    //         }, v);
+    //     }
+    //     else {
+    //         throw res.error;
+    //     }
+    // }
 
 
     void run(){
         serverSocket.listen(5);
         // ring.init();
         
-        Task t = wait_one_accept();
+        // Task t = wait_one_accept();
+        Task t = echo();
         // FIXME: as I implement all Task as initial_suspend always, so I have to resume it here
         t.resume();
 

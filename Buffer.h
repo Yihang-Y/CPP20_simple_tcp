@@ -1,42 +1,7 @@
 #pragma once
 #include <vector>
 #include "Task.h"
-
-struct RecvAttr : Attr{
-    int fd;
-    struct iovec* buf;
-    size_t size;
-};
-
-struct WriteAttr : Attr{
-    int fd;
-    const char* buf;
-    size_t size;
-};
-
-class RecvAwaitable : public SubmitAwaitable<int>{
-public:
-    RecvAwaitable(RecvAttr attr, int* res) : SubmitAwaitable{attr.sqe, res}{
-        io_uring_prep_readv(attr.sqe, attr.fd, attr.buf, 2, 0);
-    }
-};
-
-class WriteAwaitable : public SubmitAwaitable<int>{
-public:
-    WriteAwaitable(WriteAttr attr, int* res) : SubmitAwaitable{attr.sqe, res}{
-        io_uring_prep_send(attr.sqe, attr.fd, attr.buf, attr.size, 0);
-    }
-};
-
-template<>
-struct awaitable_traits<RecvAttr>{
-    using type = RecvAwaitable;
-};
-
-template<>
-struct awaitable_traits<WriteAttr>{
-    using type = WriteAwaitable;
-};
+#include "io_task.h"
 
 class Buffer {
 public:

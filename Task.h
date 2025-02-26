@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <coroutine>
 #include <cstddef>
 #include <iostream>
@@ -31,19 +32,25 @@ public:
      * - // and the original promise_type can be retrieved by using CRTP technique if needed
      * - // but for now it is not utilized
      */
-    TaskBase(promise_type& p) : coro(handle_type::from_promise(p)) {}
+    TaskBase(promise_type& p) : coro(handle_type::from_promise(p))
+    {
+    }
     TaskBase(const TaskBase&) = delete;
     TaskBase(TaskBase&& t) : coro(t.coro) { t.coro = nullptr; }
 
     // HACK: the lifetime of the coroutine is intriguing, and should be take more care 
     // ~TaskBase() { if (coro) coro.destroy(); }
-    ~TaskBase() {}
+    ~TaskBase() {
+        std::cout << "Deconstruct TaskBase" << " " << std::endl;
+        if (coro) {
+            coro.destroy();
+        }
+    }
 
     void resume(){
         // FIXME: if(coro.done()), might be a bug
         if (!coro.done())
         {
-            std::cout << "RESUME: " << &coro << std::endl;
             coro.resume();
         }
     }
@@ -53,17 +60,19 @@ public:
             // FIXME: should find another way to implement this feat
             std::cout << "ERROR: set nextTask for a coroutine that already has a caller" << std::endl;
         }else{
-            std::cout << "SET CALLER: " << &nextTask << std::endl;
             coro.promise().caller = nextTask;
         }
         return this->resume();
     }
 
-    // NOTE: it will be meaningless as you can't get its return_type inside the coroutine, the only way to get
-    // a coro inside the coroutine is to use the co_await
-    // std::coroutine_handle<> get_this_coro(){
-    //     return coro;
-    // }
+    void cancel(){
+        coro.promise().cancel();
+    }
+
+    handle_type coroHandle() {
+        return coro;
+    }
+
 
 // protected:
     handle_type coro;
@@ -77,7 +86,8 @@ public:
     using return_type = T;
     friend TaskAwaitable<Task<T>>;
 
-    Task(promise_type& p) : TaskBase<Task<T>>(static_cast<promise_base&>(p)) {}
+    Task(promise_type& p) : TaskBase<Task<T>>(static_cast<promise_base&>(p)) {
+    }
 
     // NOTE: here I come accross a problem that arises from the & after the function declaration
     // when there is a & after the function declaration, the function can only be call by a lvalue
@@ -91,42 +101,22 @@ class Task<void> : public TaskBase<Task<void>>{
 public:
     using Base = TaskBase<Task<void>>;
     using return_type = void;
+    // using promise_type = typename ::promise_type<void>;
     // NOTE: use friend to make the TaskAwaitable<Task<void>> access the private members, as it used to be the inner class
     friend TaskAwaitable<Task<void>>;
     
-    Task(promise_type& p) : TaskBase<Task<void>>(static_cast<promise_base&>(p)) {}
-
-    struct promise_type : public promise_base{
-        void return_void() {}
-        
-        auto get_return_object() {
-            return Task<void>{ *this };
-        }
-
-        template<typename AwaitableAttr>
-        auto await_transform(AwaitableAttr&& attr){
-            using real_type = std::remove_reference_t<AwaitableAttr>;
-            if constexpr(std::is_same_v<real_type, typename awaitable_traits<real_type>::type>){
-                #pragma message("AwaitableAttr is the same as its type")
-                // FIXME: should be more explicit here
-                std::cout << "call await_transform with the same type" << std::endl;
-                // NOTE: only when you co_awiat a Task, you need to store the callee
-                callee = attr.coro;
-                return attr.operator co_await();
-            } else if constexpr (std::is_same_v<typename ::DoAsOriginal, typename awaitable_traits<AwaitableAttr>::type>){
-                // #pragma message("AwaitableAttr is DoAsOriginal")
-                return attr;
-            }
-            else {
-                using awaitable_type = typename awaitable_traits<AwaitableAttr>::type;
-                return awaitable_type{attr};
-            }
-        }
-    };
+    Task(promise_type& p) : TaskBase<Task<void>>(static_cast<promise_base&>(p)) {
+    }
 
     auto operator co_await() noexcept {
         return TaskAwaitable<Task<void>>(*this);
     }
+
+    struct promise_type : public ::promise_type<void>{
+        auto get_return_object() {
+            return Task<void>{ *this };
+        }
+    };
 };
 
 template<typename T>
@@ -134,42 +124,53 @@ class when_any_state {
 public:
     std::optional<T> result;
     std::exception_ptr error;
+    std::atomic<bool> completed{false};
+    size_t index = -1;
+    when_any_state() = default;
+    when_any_state(const when_any_state& state){
+        result = state.result;
+        error = state.error;
+        completed.store(state.completed.load());
+        index = state.index;
+    }
+    when_any_state(when_any_state&&) = default;
 };
+
+template<typename Task, typename T>
+auto start_task(Task& task, size_t id,  std::shared_ptr<when_any_state<T>> state) -> ::Task<void> {
+    auto result = co_await task;
+    if (!state->completed.exchange(true)) {
+        state->result = T{std::in_place_index<0>, result};
+        state->index = id;
+    }
+    else {
+        state->error = std::current_exception();
+    }
+    co_return;
+}
 
 template<typename... Task>
 auto when_any(Task&&... tasks) -> ::Task<when_any_state<std::variant<typename std::decay_t<Task>::return_type...>>>
 {
-    (std::cout << ... << &tasks ) << std::endl;
-    std::atomic<bool> completed{false};
     using retutn_type = std::variant<typename std::decay_t<Task>::return_type...>;
 
     auto this_coro = co_await CoroAwaitable{};
     // auto this_coro = std::coroutine_handle<>::from_address(&coro);
-    auto state = when_any_state<retutn_type>();
+    auto state = std::make_shared<when_any_state<retutn_type>>();
 
-    auto start_task = [&state, &completed](auto& task) -> ::Task<void> {
-        std::cout << std::is_same_v<std::remove_reference_t<decltype(task)>, ::Task<int>> << std::endl;
-        auto result = co_await task;
-        if (!completed.exchange(true)) {
-            state.result = retutn_type{std::in_place_index<0>, result};
-        }
-        else {
-            state.error = std::current_exception();
-        }
-        co_return;
-    };
     auto tasks_tuple = [&]<size_t... idx>(std::index_sequence<idx...>) {
-        return std::make_tuple( start_task.operator()(tasks)... );
+        return std::make_tuple( start_task(tasks, idx, state)...);
     }(std::index_sequence_for<Task...>{});
     // start all the tasks
     [&]<size_t... idx>(std::index_sequence<idx...>) {
         (std::get<idx>(tasks_tuple).then(this_coro), ...);
     }(std::index_sequence_for<Task...>{});
     co_await ForgetAwaitable{};
-    // FIXME: cancel all the other tasks, and the IO_uring cancle part should be done in the Task itself
-    // 获取当前所有的task，在单线程的情况下，task肯定是在某处co_await, 所以cancel的目的是从得到的Task向下找
+    FIXME: cancel all the other tasks, and the IO_uring cancle part should be done in the Task itself
+    std::cout << state->index << std::endl;
+    // 应该是这里cancel的问题，这里cancel没有co_await，但是中间又会交出控制权，函数直接执行到co_return
     [&]<size_t... idx>(std::index_sequence<idx...>) {
-        (std::get<idx>(tasks_tuple).coro.promise().cancel(), ...);
+        ((idx != state->index ? std::get<idx>(tasks_tuple).cancel() : void()), ...);
     }(std::index_sequence_for<Task...>{});
-    co_return state;
+    co_return (*(state));
 };

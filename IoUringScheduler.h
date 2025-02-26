@@ -62,7 +62,8 @@ public:
                     void* addr = reinterpret_cast<void*>(it->second.address());
                     auto& promise = std::coroutine_handle<promise_base>::from_address(reinterpret_cast<void*>(addr)).promise();
                     promise.data = cqe->res;
-                    it->second.resume();
+                    if (it->second && !it->second.done())
+                        it->second.resume();
                     handles.erase(it);
                 }
                 io_uring_cqe_seen(&ring, cqe);
