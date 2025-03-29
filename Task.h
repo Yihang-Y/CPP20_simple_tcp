@@ -94,6 +94,10 @@ public:
     auto operator co_await() noexcept {
         return TaskAwaitable<Task<T>>(*this);
     }
+
+    void cancel(){
+        this->coro.promise().cancel();
+    }
 };
 
 template<>
@@ -166,7 +170,7 @@ auto when_any(Task&&... tasks) -> ::Task<when_any_state<std::variant<typename st
         (std::get<idx>(tasks_tuple).then(this_coro), ...);
     }(std::index_sequence_for<Task...>{});
     co_await ForgetAwaitable{};
-    FIXME: cancel all the other tasks, and the IO_uring cancle part should be done in the Task itself
+    // FIXME: cancel all the other tasks, and the IO_uring cancle part should be done in the Task itself
     std::cout << state->index << std::endl;
     // 应该是这里cancel的问题，这里cancel没有co_await，但是中间又会交出控制权，函数直接执行到co_return
     [&]<size_t... idx>(std::index_sequence<idx...>) {

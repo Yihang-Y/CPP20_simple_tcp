@@ -16,6 +16,7 @@
 #include "Socket.h"
 #include "Task.h"
 #include "io_task.h"
+#include "io_context.h"
 
 
 class TCPServer{
@@ -63,6 +64,7 @@ public:
             }
             connections.emplace(std::piecewise_construct_t{}, std::forward_as_tuple(clientFd), std::forward_as_tuple(clientFd));
             // spawn(handle_client(clientFd));
+            detail::this_thread.io_ctx->co_spawn(handle_client(clientFd));
             // handle_client(clientFd).resume();
         }
     }
