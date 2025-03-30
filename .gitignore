@@ -39,3 +39,6 @@ local*
 
 # html
 *.html
+
+epoll-echo-server/
+rust-echo-bench/

@@ -32,15 +32,17 @@ public:
     TaskBase(const TaskBase&) = delete;
     TaskBase(TaskBase&& t) : coro(t.coro) { t.coro = nullptr; }
 
-    // HACK: the lifetime of the coroutine is intriguing, and should be take more care 
-    // ~TaskBase() { if (coro) coro.destroy(); }
-    ~TaskBase() {}
+    ~TaskBase() { 
+        if (coro && !coro.promise().is_detached()) { 
+            coro.destroy();
+        }
+    }
 
     void resume(){
         // FIXME: if(coro.done()), might be a bug
         if (!coro.done())
         {
-            std::cout << "RESUME: " << &coro << std::endl;
+            // std::cout << "RESUME: " << &coro << std::endl;
             coro.resume();
         }
     }
@@ -60,6 +62,18 @@ public:
     // std::coroutine_handle<> get_this_coro(){
     //     return coro;
     // }
+
+    // 将协程标记为分离状态，此后生命周期由调度器管理
+    void detach() {
+        if (coro) {
+            coro.promise().detach();
+        }
+    }
+
+    // 查询协程是否已完成
+    bool isCompleted() const {
+        return coro == nullptr || coro.done();
+    }
 
 // protected:
     handle_type coro;

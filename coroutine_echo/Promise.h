@@ -12,6 +12,17 @@ template<typename T>
 struct awaitable_traits;
 struct DoAsOriginal;
 
+
+struct final_awaiter {
+    bool await_ready() noexcept { return false; }
+    template<typename PromiseType>
+    auto await_suspend(std::coroutine_handle<PromiseType> handle) noexcept {
+        auto& promise = handle.promise();
+        return promise.caller ? promise.caller : std::noop_coroutine();
+    }
+    void await_resume() noexcept {}
+};
+
 /**
  * @brief used to implement the chains of coroutines
  * 
@@ -23,9 +34,13 @@ struct DoAsOriginal;
  */
 struct promise_base{
     promise_base() = default;
-    promise_base(std::coroutine_handle<> caller, std::any data) : caller(caller), data(std::move(data)){}
+    promise_base(std::coroutine_handle<> caller, std::any data) : caller(caller), data(std::move(data)), detached_(false) {}
     std::coroutine_handle<> caller = nullptr;
     std::any data;
+    bool detached_ = false;
+
+    void detach() { detached_ = true; }
+    bool is_detached() const { return detached_; }
 
     void unhandled_exception() {
         std::cout <<"ERROR: unhandled exception in coroutine" << std::endl;
@@ -35,10 +50,15 @@ struct promise_base{
     std::suspend_always initial_suspend() noexcept { return {}; }
     // TODO: further investigate the lifetime of the coroutine, should we destroy it in the final_suspend?
     // HACK: I just destory the coroutine here, but it might be a bug
-    std::suspend_never final_suspend() noexcept {
-        if(caller){
-            caller.resume();
-        }
+    // std::suspend_never final_suspend() noexcept {
+    //     if(caller){
+    //         caller.resume();
+    //     }
+    //     return {};
+    // }
+
+    // NOTE: A better way to implement the final_suspend
+    final_awaiter final_suspend() noexcept {
         return {};
     }
 };

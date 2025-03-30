@@ -4,6 +4,7 @@
 #include <liburing/io_uring.h>
 #include <any>
 #include "IoUringScheduler.h"
+#include "IoUringSchedulerAdapter.h"
 
 // NOTE: Attr, Awaitable and awaitable_traits used to foward the parameters to the io_uring functions
 struct Attr{
