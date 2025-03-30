@@ -41,4 +41,4 @@ local*
 *.html
 
 epoll-echo-server/
-rust-echo-bench/
+/coroutine_echo/.perf_test
