@@ -1,11 +1,11 @@
 #!/bin/bash
 
-SERVER="./build/simple_tcp"
+SERVER="./build/epoll_echo"
 BENCH_TOOL_PATH="../rust_echo_bench"
 BENCH_TOOL="cargo run --release -- --address '127.0.0.1:8080' --number 100 --duration 30 --length 512"
 SERVER_STARTUP_DELAY=1
 PERF_DURATION=30
-OUTPUT_DIR="../results/perf_test_coroutine"
+OUTPUT_DIR="../results/perf_test_epoll"
 
 FLAMEGRAPH_DIR="/mnt/tools/FlameGraph"
 
@@ -32,7 +32,7 @@ sleep 1
 
 # 启动 perf 采样，采集 server 的性能数据
 echo "开始 perf 采样..."
-perf record -F 99 -p $SERVER_PID -e cycles:u -g -o $OUTPUT_DIR/perf.data -- sleep $PERF_DURATION &
+perf record -F 99 -p $SERVER_PID -g -o $OUTPUT_DIR/perf.data -- sleep $PERF_DURATION &
 PERF_PID=$!
 
 # echo "开始 valgrind..."

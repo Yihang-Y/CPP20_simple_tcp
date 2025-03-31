@@ -1,0 +1,66 @@
+{
+  "coroutine_echo": [
+    {
+      "requests_per_second": 37865,
+      "total_requests": 378658,
+      "total_responses": 378658,
+      "clients": 10
+    },
+    {
+      "requests_per_second": 57919,
+      "total_requests": 579198,
+      "total_responses": 579198,
+      "clients": 50
+    },
+    {
+      "requests_per_second": 65977,
+      "total_requests": 659774,
+      "total_responses": 659774,
+      "clients": 100
+    },
+    {
+      "requests_per_second": 78245,
+      "total_requests": 782451,
+      "total_responses": 782364,
+      "clients": 200
+    },
+    {
+      "requests_per_second": 87949,
+      "total_requests": 879498,
+      "total_responses": 879129,
+      "clients": 500
+    }
+  ],
+  "epoll_echo": [
+    {
+      "requests_per_second": 88463,
+      "total_requests": 884634,
+      "total_responses": 884634,
+      "clients": 10
+    },
+    {
+      "requests_per_second": 99970,
+      "total_requests": 999706,
+      "total_responses": 999705,
+      "clients": 50
+    },
+    {
+      "requests_per_second": 96895,
+      "total_requests": 968952,
+      "total_responses": 968952,
+      "clients": 100
+    },
+    {
+      "requests_per_second": 103826,
+      "total_requests": 1038269,
+      "total_responses": 1038239,
+      "clients": 200
+    },
+    {
+      "requests_per_second": 104405,
+      "total_requests": 1044054,
+      "total_responses": 1043692,
+      "clients": 500
+    }
+  ]
+}

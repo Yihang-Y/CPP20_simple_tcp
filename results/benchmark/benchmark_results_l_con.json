@@ -1,0 +1,30 @@
+{
+  "coroutine_echo": [
+    {
+      "requests_per_second": 85551,
+      "total_requests": 2566545,
+      "total_responses": 2565826,
+      "clients": 1000
+    },
+    {
+      "requests_per_second": 9324,
+      "total_requests": 279743,
+      "total_responses": 277743,
+      "clients": 2000
+    }
+  ],
+  "epoll_echo": [
+    {
+      "requests_per_second": 94189,
+      "total_requests": 2825687,
+      "total_responses": 2825027,
+      "clients": 1000
+    },
+    {
+      "requests_per_second": 89011,
+      "total_requests": 2670331,
+      "total_responses": 2668607,
+      "clients": 2000
+    }
+  ]
+}

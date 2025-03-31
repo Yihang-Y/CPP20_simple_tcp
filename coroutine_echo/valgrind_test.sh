@@ -1,6 +1,6 @@
 #!/bin/bash
 
-OUTPUT_DIR=".perf_test"
+OUTPUT_DIR="../results/perf_test_coroutine"
 SERVER="./build/simple_tcp"
 SERVER_STARTUP_DELAY=1
 BENCH_TOOL_PATH="../rust_echo_bench"
@@ -13,7 +13,7 @@ mkdir -p "$OUTPUT_DIR"
 
 echo "启动 server (在 Valgrind Massif 下)..."
 # 立即捕获后台进程的 PID
-heaptrack $SERVER > "$OUTPUT_DIR/server.log" 2>&1 &
+valgrind --tool=massif --massif-out-file=$OUTPUT_DIR/massif.out $SERVER > "$OUTPUT_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 
 # 启动基准测试
@@ -30,10 +30,3 @@ kill $SERVER_PID
 
 # 等待 server 真正退出，确保 massif.out 文件完整写入
 wait $SERVER_PID
-
-# 现在生成内存报告
-if [ -d "$FLAMEGRAPH_DIR" ]; then
-    heaptrack_print --export-flamegraph heaptrack.gz > "$OUTPUT_DIR/folded.txt"
-    $FLAMEGRAPH_DIR/flamegraph.pl "$OUTPUT_DIR/folded.txt" > "$OUTPUT_DIR/heap_flamegraph.svg"
-fi
-echo "内存分析完成，报告保存在 $OUTPUT_DIR/memory_report.txt"

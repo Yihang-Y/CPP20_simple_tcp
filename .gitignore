@@ -41,4 +41,11 @@ local*
 *.html
 
 epoll-echo-server/
-/coroutine_echo/.perf_test
+*.log
+*.data
+*.out
+*.perf
+*.massif.out
+*.massif.out.gz
+*.massif.out.gz.bz2
+*.txt
