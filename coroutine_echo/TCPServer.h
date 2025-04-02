@@ -38,10 +38,11 @@ struct awaitable_traits<AcceptAttr>{
 class TCPServer{
 
 public:
-    TCPServer() : serverSocket("8080"){
-        serverSocket.setResusePort();
+    TCPServer() : serverSocket("8080"), scheduler_(nullptr) {
+        serverSocket.setReusePort();
     }
-    TCPServer(const std::string& ip_port) : serverSocket(ip_port){
+    TCPServer(const std::string& ip_port, IoUringScheduler* scheduler) 
+        : serverSocket(ip_port), scheduler_(scheduler) {
     }
     ~TCPServer(){}
 
@@ -52,10 +53,10 @@ public:
      * @return Task<int> 
      */
     Task<int> accept(InetAddr* clientAddr) {
-        io_uring_sqe *sqe = io_uring_get_sqe(getScheduler().getRing());
+        io_uring_sqe *sqe = io_uring_get_sqe(scheduler_->getRing());
         auto len = clientAddr->get_size();
         int res = co_await AcceptAttr{{sqe}, serverSocket.getFd(), clientAddr->getAddr(), &len};
-        std::cout << "ACCEPTED: " << res << " FROM: " << clientAddr->get_sin_addr() << std::endl;
+        // std::cout << "ACCEPTED: " << res << " FROM: " << clientAddr->get_sin_addr() << std::endl;
         if (res < 0) {
             std::cout << "ERROR: "<< strerror(-res) << std::endl;
             co_return -1;
@@ -64,6 +65,7 @@ public:
     }
 
     Task<void> echo(){
+        std::cout << "echo coroutine started" << std::endl;
         while (true){
             InetAddr clientAddr;
             auto clientFd = co_await accept(&clientAddr);
@@ -72,22 +74,30 @@ public:
                 continue;
             }
             connections.emplace(std::piecewise_construct_t{}, std::forward_as_tuple(clientFd), std::forward_as_tuple(clientFd));
-            // spawn(handle_client(clientFd));
-            handle_client(clientFd).resume();
+            
+ 
+            scheduler_->co_spawn(handle_client(clientFd));
+
         }
     }
 
     Task<void> handle_client(int clientFd){ 
         while (true){
-            auto res = co_await connections[clientFd].read();
+            // 将Task保存在变量中，确保其生命周期延长到co_await结束
+            Task<int> readTask = connections[clientFd].read();
+            auto res = co_await readTask;
+            
             if (res <= 0) {
                 connections.erase(clientFd);
                 co_return;
             }
 
-            connections[clientFd].writeBuf.append(connections[clientFd].readBuf.peek(), res);
-
-            auto writeRes = co_await connections[clientFd].write(res);
+            connections[clientFd].writeBuf.append(connections[clientFd].readBuf.retrieve(res), res);
+            
+            // 同样保存写任务
+            Task<int> writeTask = connections[clientFd].write(res);
+            auto writeRes = co_await writeTask;
+            
             if (writeRes < 0) {
                 connections.erase(clientFd);
                 co_return;
@@ -106,7 +116,7 @@ public:
         if (res.result.has_value()){
             auto v = res.result.value();
             std::visit([](auto&& arg){
-                std::cout << "ACCEPTED: " << arg << std::endl;
+                // std::cout << "ACCEPTED: " << arg << std::endl;
             }, v);
         }
         else {
@@ -119,16 +129,14 @@ public:
         serverSocket.listen(5);
         // ring.init();
         
-        Task t = wait_one_accept();
-        // FIXME: as I implement all Task as initial_suspend always, so I have to resume it here
-        t.resume();
-
-        getScheduler().run();
+        scheduler_->co_spawn(echo());
+        scheduler_->run();
     }
 
     // IOUring ring;
 private:
     Socket serverSocket;
+    IoUringScheduler* scheduler_; // 非拥有指针
  
     using ConnectionMap = std::map<int, Connection>;
     ConnectionMap connections;

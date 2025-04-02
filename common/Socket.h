@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include "utils.h"
 
 
@@ -59,10 +60,20 @@ public:
         close(fd);
     }
 
-    void setResusePort(){
+    void setReusePort(){
         int opt = 1;
         if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)) < 0) {
             throw std::system_error(errno, std::system_category(), "setsockopt");
+        }
+    }
+
+    void setNonBlocking() {
+        int flags = fcntl(fd, F_GETFL, 0);
+        if (flags == -1) {
+            throw std::system_error(errno, std::system_category(), "fcntl get");
+        }
+        if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+            throw std::system_error(errno, std::system_category(), "fcntl set");
         }
     }
 
@@ -70,6 +81,15 @@ public:
         if (::listen(fd, backlog) < 0) {
             throw std::system_error(errno, std::system_category(), "listen");
         }
+    }
+
+    int accept(InetAddr* clientAddr){
+        socklen_t len = clientAddr->get_size();
+        int connfd = ::accept(fd, (sockaddr*)clientAddr->getAddr(), &len);
+        if (connfd < 0) {
+            throw std::system_error(errno, std::system_category(), "accept");
+        }
+        return connfd;
     }
 
     int getFd(){

@@ -39,3 +39,13 @@ local*
 
 # html
 *.html
+
+epoll-echo-server/
+*.log
+*.data
+*.out
+*.perf
+*.massif.out
+*.massif.out.gz
+*.massif.out.gz.bz2
+*.txt

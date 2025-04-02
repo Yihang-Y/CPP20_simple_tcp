@@ -6,6 +6,7 @@
 #include "Task.h"
 #include "utils.h"
 #include "Buffer.h"
+#include "BufferOperations.h"
 
 class TCPServer;
 
@@ -17,30 +18,30 @@ public:
     Connection(int fd): fd(fd) {}
     ~Connection(){
         close(fd);
-        std::cout << "Deconstruct Connection" << std::endl;
+        // std::cout << "Deconstruct Connection" << std::endl;
     }
 
     Task<int> read(){
-        auto res = co_await readBuf.recv(fd);
+        auto res = co_await recv(readBuf, fd);
         if (res == 0) {
-            std::cout << "Connection closed" << std::endl;
+            // std::cout << "Connection closed" << std::endl;
             co_return 0;
         }
         else if (res < 0) {
             std::cout << "ERROR: "<< strerror(-res) << std::endl;
             co_return -1;
         }
-        std::cout << "Read " << res << " bytes" << std::endl;
+        // std::cout << "Read " << res << " bytes" << std::endl;
         co_return res;
     }
 
     Task<int> write(size_t len){
-        auto res = co_await writeBuf.send(fd, len);
+        auto res = co_await send(writeBuf, fd, len);
         if (res < 0) {
             std::cout << "ERROR: "<< strerror(-res) << std::endl;
             co_return -1;
         }
-        std::cout << "Write " << len << " bytes" << std::endl;
+        // std::cout << "Write " << len << " bytes" << std::endl;
         co_return len;
     }
 
