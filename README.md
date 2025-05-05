@@ -25,6 +25,19 @@ The project includes comprehensive benchmarking tools that measure:
 - Connection handling capacity
 - Performance with different message sizes (16B, 2KB, etc.)
 
+### Benchmark Tools
+
+1. **Python Benchmark Tool** (`benchmark.py`)
+   - 使用 Rust 基准测试工具进行性能测试
+   - 支持多客户端并发测试
+   - 生成性能对比图表
+
+2. **Simple Test Tool** (`test_coroutine_echo.py`)
+   - 轻量级测试工具，用于基本功能验证
+   - 支持自定义并发客户端数量
+   - 支持自定义消息大小
+   - 提供详细的性能指标
+
 ## Building and Running
 
 ```bash
@@ -34,8 +47,11 @@ cd coroutine_echo && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && ninja
 # Build Epoll Echo Server
 cd epoll_echo && cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && ninja -C build
 
-# Run Benchmarks
+# Run Comprehensive Benchmarks
 python benchmark.py
+
+# Run Simple Test
+python test_coroutine_echo.py --clients 100 --message-length 512 --messages 1000
 ```
 
 ## Requirements
@@ -46,4 +62,7 @@ python benchmark.py
 - Rust (for benchmark tool)
 
 ## Results
-Performance comparison results are available in the benchmark_results_*.json files and corresponding PNG visualizations.
+Performance comparison results are available in the results/ directory.
+
+## License
+MIT
